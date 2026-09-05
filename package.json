@@ -1,0 +1,51 @@
+{
+  "name": "@localminds/workflow",
+  "version": "0.1.0",
+  "description": "Local-first agent workflow engine — skills, graph IR, parallel fan-out/fan-in, host-injected tools.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "test": "npm run build && node --test dist/**/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "workflow",
+    "graph",
+    "skills",
+    "local-first",
+    "localminds",
+    "orchestration"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/presencewebdesign/localminds-workflow.git"
+  },
+  "homepage": "https://localminds.io",
+  "publishConfig": {
+    "access": "public"
+  }
+}
