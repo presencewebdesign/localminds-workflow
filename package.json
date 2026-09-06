@@ -13,7 +13,7 @@
     }
   },
   "bin": {
-    "localminds-workflow": "./studio/server.cjs"
+    "localminds-workflow": "studio/server.cjs"
   },
   "files": [
     "dist",
