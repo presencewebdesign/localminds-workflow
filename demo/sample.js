@@ -1,0 +1,86 @@
+/** Sample library + workflow used by the browser demo. */
+
+const library = {
+  instructions: [],
+  agents: [],
+  prompts: [],
+  workflows: [],
+  skills: [
+    {
+      kind: 'skill',
+      slug: 'plan',
+      name: 'Plan',
+      description: 'Turns a goal into a short research plan.',
+      mode: 'ask',
+      body: 'Write a concise numbered research plan. Do not edit files.',
+    },
+    {
+      kind: 'skill',
+      slug: 'web-research',
+      name: 'Web research',
+      description: 'Searches the web for supporting evidence.',
+      mode: 'agent',
+      tools: ['web'],
+      body: 'Use web_search, then summarize findings. Do not edit files.',
+    },
+    {
+      kind: 'skill',
+      slug: 'inspect-repo',
+      name: 'Inspect repo',
+      description: 'Reads repository files for local evidence.',
+      mode: 'agent',
+      tools: ['search'],
+      body: 'Use request_files to inspect the repo, then summarize. Do not edit files.',
+    },
+    {
+      kind: 'skill',
+      slug: 'review',
+      name: 'Review',
+      description: 'Synthesizes parallel branch outputs.',
+      mode: 'ask',
+      body: 'Synthesize the joined branch outputs into a short verdict.',
+    },
+  ],
+};
+
+const workflow = {
+  id: 'demo-parallel',
+  slug: 'demo-parallel',
+  name: 'Plan + parallel research',
+  description: 'Plan, fan out web + repo, join, then review.',
+  autoApply: true,
+  steps: [
+    {
+      id: 'plan',
+      type: 'skill',
+      ref: 'plan',
+      input: 'How should we evaluate @localminds/workflow as a standalone engine?',
+    },
+    {
+      id: 'fanout',
+      type: 'parallel',
+      steps: [
+        {
+          id: 'web',
+          type: 'skill',
+          ref: 'web-research',
+          input: 'Research this plan on the web:\n{{nodes.plan.output}}',
+        },
+        {
+          id: 'repo',
+          type: 'skill',
+          ref: 'inspect-repo',
+          input: 'Inspect the package against this plan:\n{{nodes.plan.output}}',
+        },
+      ],
+    },
+    {
+      id: 'review',
+      type: 'skill',
+      ref: 'review',
+      input: 'Synthesize both branches:\n{{join.output}}',
+    },
+  ],
+};
+
+module.exports = { library, workflow };

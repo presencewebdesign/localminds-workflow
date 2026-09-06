@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workflow CMS — @localminds/workflow</title>
+  <link rel="stylesheet" href="/studio.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>@localminds/workflow <span>CMS</span></h1>
+      <p id="repo-path">Loading…</p>
+    </div>
+    <div class="grow"></div>
+    <span id="save-state" class="state">Saved</span>
+    <button type="button" id="btn-example">Load example</button>
+    <button type="button" id="btn-export">Export</button>
+    <label class="import">
+      Import
+      <input type="file" id="btn-import" accept="application/json" />
+    </label>
+    <button type="button" id="btn-validate">Validate</button>
+    <button type="button" class="primary" id="btn-save">Save JSON</button>
+  </header>
+
+  <div class="app">
+    <nav id="sidebar">
+      <section>
+        <div class="sec-head">
+          <h2>Workflows</h2>
+          <button type="button" class="add" data-add="workflow">+</button>
+        </div>
+        <ul id="list-workflows"></ul>
+      </section>
+      <section>
+        <div class="sec-head">
+          <h2>Skills</h2>
+          <button type="button" class="add" data-add="skill">+</button>
+        </div>
+        <ul id="list-skills"></ul>
+      </section>
+      <section>
+        <div class="sec-head">
+          <h2>Agents</h2>
+          <button type="button" class="add" data-add="agent">+</button>
+        </div>
+        <ul id="list-agents"></ul>
+      </section>
+      <section>
+        <div class="sec-head">
+          <h2>Prompts</h2>
+          <button type="button" class="add" data-add="prompt">+</button>
+        </div>
+        <ul id="list-prompts"></ul>
+      </section>
+      <section>
+        <div class="sec-head">
+          <h2>Instructions</h2>
+          <button type="button" class="add" data-add="instruction">+</button>
+        </div>
+        <ul id="list-instructions"></ul>
+      </section>
+    </nav>
+
+    <main>
+      <section id="empty" class="empty">
+        <h2>Workflow JSON CMS</h2>
+        <p>Create a workflow or skill, or load the example. Saving writes <code>.localminds/</code> in this repo. The engine is unchanged — this studio only authors the JSON it already runs.</p>
+        <div class="empty-actions">
+          <button type="button" class="primary" data-add="workflow">New workflow</button>
+          <button type="button" id="empty-example">Load example</button>
+        </div>
+      </section>
+
+      <section id="editor" hidden>
+        <div id="meta"></div>
+        <div id="workflow-body" hidden>
+          <div class="split">
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Steps</h2>
+                <button type="button" id="btn-add-step">Add step</button>
+              </div>
+              <ul id="step-tree"></ul>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Compiled graph</h2>
+                <span id="compile-status" class="state">—</span>
+              </div>
+              <div id="stage"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside id="inspector">
+      <div class="tabs">
+        <button type="button" class="tab on" data-tab="fields">Inspector</button>
+        <button type="button" class="tab" data-tab="json">JSON</button>
+      </div>
+      <div id="fields" class="tab-body"></div>
+      <div id="json-panel" class="tab-body" hidden>
+        <textarea id="json-editor" spellcheck="false"></textarea>
+        <div class="json-actions">
+          <button type="button" id="btn-apply-json">Apply JSON</button>
+          <button type="button" id="btn-copy-json">Copy</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" hidden></div>
+  <script src="/studio.js"></script>
+</body>
+</html>

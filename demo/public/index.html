@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@localminds/workflow — live graph</title>
+  <style>
+    :root {
+      --bg: #12110f;
+      --ink: #ece7dc;
+      --muted: #9a9386;
+      --line: #2c2a26;
+      --panel: #1a1916;
+      --plan: #c4b5a0;
+      --run: #d97757;
+      --wait: #c9a227;
+      --ok: #7ea36b;
+      --fail: #c45c5c;
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.45 var(--sans);
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 18px;
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: 0.01em;
+      font-weight: 600;
+    }
+    header h1 span { color: var(--muted); font-weight: 400; }
+    header p { margin: 0; color: var(--muted); font-size: 13px; }
+    header .grow { flex: 1; }
+    button, .toggle {
+      font: 12px/1 var(--mono);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--run); color: #1a100c; border-color: var(--run); }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .toggle[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      height: calc(100% - 64px);
+    }
+    #stage { position: relative; overflow: auto; padding: 28px 20px 40px; }
+    svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    svg.edges path { fill: none; stroke: #3d3a34; stroke-width: 1.25; }
+    .node {
+      position: absolute;
+      width: 168px;
+      padding: 10px 12px 11px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--plan);
+    }
+    .node .kind { font: 10px/1 var(--mono); color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+    .node .title { margin: 5px 0 2px; font-size: 15px; }
+    .node .status { font: 11px/1.3 var(--mono); color: var(--muted); }
+    .node.ready { border-left-color: #6e6a62; }
+    .node.running, .node.waiting_for_tool { border-left-color: var(--run); }
+    .node.waiting_for_approval { border-left-color: var(--wait); }
+    .node.completed, .node.join-done { border-left-color: var(--ok); }
+    .node.failed, .node.cancelled { border-left-color: var(--fail); }
+    .node.selected { outline: 1px solid var(--ink); }
+    aside {
+      border-left: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    aside h2 {
+      margin: 0;
+      padding: 14px 16px 10px;
+      font-size: 12px;
+      font-family: var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+    }
+    #output, #log {
+      margin: 0;
+      padding: 12px 16px;
+      white-space: pre-wrap;
+      font: 12px/1.5 var(--mono);
+      color: var(--ink);
+      overflow: auto;
+    }
+    #output { flex: 0 0 38%; border-bottom: 1px solid var(--line); color: #d8d2c4; }
+    #log { flex: 1; color: var(--muted); }
+    #log .ev { display: block; margin: 0 0 6px; }
+    #log .t { color: #6e6a62; }
+    #log .ok { color: var(--ok); }
+    #log .run { color: var(--run); }
+    #log .fail { color: var(--fail); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>@localminds/workflow <span>live graph</span></h1>
+      <p>Plan → parallel web + repo → join → review. Mock host, real executor.</p>
+    </div>
+    <div class="grow"></div>
+    <button class="toggle" id="mode" aria-pressed="false">Online</button>
+    <button class="primary" id="run">Run graph</button>
+  </header>
+  <main>
+    <section id="stage"></section>
+    <aside>
+      <h2 id="out-label">Node output</h2>
+      <pre id="output">Click Run. Parallel branches should light up together, then the join collects both.</pre>
+      <h2>Event stream</h2>
+      <pre id="log"></pre>
+    </aside>
+  </main>
+  <script>
+    const stage = document.getElementById('stage');
+    const logEl = document.getElementById('log');
+    const outEl = document.getElementById('output');
+    const outLabel = document.getElementById('out-label');
+    const runBtn = document.getElementById('run');
+    const modeBtn = document.getElementById('mode');
+    const nodes = new Map();
+    const outputs = new Map();
+    let selected = null;
+    let source = null;
+
+    const W = 168, H = 74, GX = 56, GY = 48;
+
+    function levels(ir) {
+      const incoming = new Map(ir.nodes.map((n) => [n.id, []]));
+      for (const e of ir.edges) incoming.get(e.to)?.push(e.from);
+      const level = new Map();
+      const visit = (id) => {
+        if (level.has(id)) return level.get(id);
+        const preds = incoming.get(id) || [];
+        const lv = preds.length ? Math.max(...preds.map(visit)) + 1 : 0;
+        level.set(id, lv);
+        return lv;
+      };
+      ir.nodes.forEach((n) => visit(n.id));
+      const rows = [];
+      for (const n of ir.nodes) {
+        const lv = level.get(n.id);
+        (rows[lv] ||= []).push(n);
+      }
+      return { rows, incoming };
+    }
+
+    function layout(ir) {
+      const { rows } = levels(ir);
+      const pos = new Map();
+      const widths = rows.map((row) => row.length * W + Math.max(0, row.length - 1) * GX);
+      const maxW = Math.max(0, ...widths);
+      let maxH = 0;
+      rows.forEach((row, y) => {
+        const rowW = widths[y];
+        row.forEach((n, x) => {
+          const left = (maxW - rowW) / 2 + x * (W + GX) + 36;
+          const top = 24 + y * (H + GY);
+          pos.set(n.id, { left, top, cx: left + W / 2, cy: top + H / 2 });
+          maxH = Math.max(maxH, top + H + 36);
+        });
+      });
+      return { pos, width: maxW + 72, height: maxH };
+    }
+
+    function renderGraph(ir) {
+      const { pos, width, height } = layout(ir);
+      stage.innerHTML = '';
+      stage.style.minHeight = height + 'px';
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'edges');
+      svg.style.width = width + 'px';
+      svg.style.height = height + 'px';
+      for (const e of ir.edges) {
+        const a = pos.get(e.from), b = pos.get(e.to);
+        if (!a || !b) continue;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const mid = (a.cy + b.cy) / 2;
+        path.setAttribute('d', `M ${a.cx} ${a.cy + 28} C ${a.cx} ${mid}, ${b.cx} ${mid}, ${b.cx} ${b.cy - 28}`);
+        svg.appendChild(path);
+      }
+      stage.appendChild(svg);
+      for (const n of ir.nodes) {
+        const p = pos.get(n.id);
+        const el = document.createElement('div');
+        el.className = 'node pending';
+        el.style.left = p.left + 'px';
+        el.style.top = p.top + 'px';
+        el.dataset.id = n.id;
+        const kind = n.kind === 'join' ? 'join' : n.kind === 'loop' ? 'loop' : (n.ref || 'skill');
+        el.innerHTML = `<div class="kind">${kind}</div><div class="title">${n.title || n.id}</div><div class="status">pending</div>`;
+        el.addEventListener('click', () => select(n.id));
+        stage.appendChild(el);
+        nodes.set(n.id, el);
+      }
+    }
+
+    function select(id) {
+      selected = id;
+      for (const el of nodes.values()) el.classList.toggle('selected', el.dataset.id === id);
+      outLabel.textContent = id;
+      outEl.textContent = outputs.get(id) || 'No output yet.';
+    }
+
+    function setStatus(id, status) {
+      const el = nodes.get(id);
+      if (!el) return;
+      el.className = 'node ' + status + (selected === id ? ' selected' : '');
+      el.querySelector('.status').textContent = status.replaceAll('_', ' ');
+    }
+
+    function addLog(ev) {
+      const line = document.createElement('span');
+      line.className = 'ev';
+      const kind = ev.type || '';
+      if (kind.includes('failed') || kind.includes('cancelled')) line.classList.add('fail');
+      else if (kind.includes('completed') || kind === 'join.completed') line.classList.add('ok');
+      else if (kind.includes('started') || kind.includes('tool') || kind === 'node.token') line.classList.add('run');
+      const time = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '';
+      const extra = ev.title || ev.outputText || ev.detail || ev.message || ev.error?.message || ev.tool || '';
+      line.innerHTML = `<span class="t">${time}</span>  ${kind}${ev.nodeId ? ' · ' + ev.nodeId : ''}${extra ? ' · ' + String(extra).slice(0, 140) : ''}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function handleEvent(ev) {
+      if (ev.type !== 'node.token' && ev.type !== 'node.thinking') addLog(ev);
+      if (ev.type === 'node.started') setStatus(ev.nodeId, 'running');
+      if (ev.type === 'node.toolRequested') setStatus(ev.nodeId, 'waiting_for_tool');
+      if (ev.type === 'node.toolCompleted' || ev.type === 'node.token') setStatus(ev.nodeId, 'running');
+      if (ev.type === 'node.waitingForApproval') setStatus(ev.nodeId, 'waiting_for_approval');
+      if (ev.type === 'node.completed' || ev.type === 'join.completed') {
+        setStatus(ev.nodeId, 'completed');
+        if (ev.outputText) {
+          outputs.set(ev.nodeId, ev.outputText);
+          if (!selected || selected === ev.nodeId) select(ev.nodeId);
+        }
+      }
+      if (ev.type === 'node.failed') setStatus(ev.nodeId, 'failed');
+      if (ev.type === 'node.cancelled') setStatus(ev.nodeId, 'cancelled');
+      if (ev.type === 'node.token' && ev.nodeId) {
+        outputs.set(ev.nodeId, (outputs.get(ev.nodeId) || '') + ev.token);
+        if (selected === ev.nodeId) outEl.textContent = outputs.get(ev.nodeId);
+      }
+    }
+
+    async function load() {
+      const data = await fetch('/api/graph').then((r) => r.json());
+      renderGraph(data.ir);
+    }
+
+    modeBtn.addEventListener('click', () => {
+      const next = modeBtn.getAttribute('aria-pressed') !== 'true';
+      modeBtn.setAttribute('aria-pressed', String(next));
+      modeBtn.textContent = next ? 'Offline' : 'Online';
+    });
+
+    runBtn.addEventListener('click', () => {
+      if (source) source.close();
+      logEl.textContent = '';
+      outputs.clear();
+      for (const id of nodes.keys()) setStatus(id, 'pending');
+      runBtn.disabled = true;
+      const offline = modeBtn.getAttribute('aria-pressed') === 'true' ? '1' : '0';
+      source = new EventSource('/api/run?offline=' + offline);
+      source.onmessage = (e) => {
+        const ev = JSON.parse(e.data);
+        handleEvent(ev);
+        if (ev.type === 'workflow.completed' || ev.type === 'workflow.failed') {
+          source.close();
+          source = null;
+          runBtn.disabled = false;
+        }
+      };
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        runBtn.disabled = false;
+      };
+    });
+
+    load();
+  </script>
+</body>
+</html>

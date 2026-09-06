@@ -12,8 +12,12 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "localminds-workflow": "./studio/server.cjs"
+  },
   "files": [
     "dist",
+    "studio",
     "README.md",
     "LICENSE"
   ],
@@ -24,6 +28,8 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "test": "npm run build && node --test dist/**/*.test.js",
+    "demo": "npm run build && node demo/server.cjs",
+    "studio": "npm run build && node studio/server.cjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
