@@ -24,8 +24,8 @@ The package requires Node.js 18 or newer.
 ## Run Studio from this repository
 
 Studio is a standalone browser CMS for authoring the same
-`ProjectLibrary` / `Workflow` JSON that the engine compiles. It does not change
-the engine, call a model, or store API keys.
+`ProjectLibrary` / `Workflow` JSON that the engine compiles. It does not
+change the engine or store API keys.
 
 Start it with:
 
@@ -46,6 +46,12 @@ Studio writes:
 is saved separately under `workflows/`. Load the library and the selected
 workflow together as a `ProjectLibrary` before passing them to
 `compileWorkflow` or `GraphExecutor`.
+
+Select a skill or workflow and click **Run** to preview it in Studio. The
+server wraps a skill as a one-step workflow and drives `GraphExecutor`. If
+Ollama is running at `127.0.0.1:11434`, Studio uses it; otherwise it uses a
+mock host. Pass `--mock` (or `LOCALMINDS_STUDIO_MOCK=1`) to force the mock.
+Studio never applies file operations or runs shell commands.
 
 ## Run Studio from another repository
 

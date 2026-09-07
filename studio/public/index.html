@@ -21,6 +21,7 @@
       <input type="file" id="btn-import" accept="application/json" />
     </label>
     <button type="button" id="btn-validate">Validate</button>
+    <button type="button" id="btn-run">Run</button>
     <button type="button" class="primary" id="btn-save">Save JSON</button>
   </header>
 
@@ -66,7 +67,7 @@
     <main>
       <section id="empty" class="empty">
         <h2>Workflow JSON CMS</h2>
-        <p>Create a workflow or skill, or load the example. Saving writes <code>.localminds/</code> in this repo. The engine is unchanged — this studio only authors the JSON it already runs.</p>
+        <p>Create a workflow or skill, or load the example. Saving writes <code>.localminds/</code> in this repo. Click <strong>Run</strong> on a skill or workflow to preview it here. File operations are never applied from Studio.</p>
         <div class="empty-actions">
           <button type="button" class="primary" data-add="workflow">New workflow</button>
           <button type="button" id="empty-example">Load example</button>
@@ -91,6 +92,23 @@
               </div>
               <div id="stage"></div>
             </div>
+          </div>
+        </div>
+        <div id="run-body" hidden>
+          <div class="panel run-panel">
+            <div class="panel-head">
+              <h2 id="run-heading">Run</h2>
+              <div class="run-head-ops">
+                <span id="run-host" class="state">—</span>
+                <button type="button" class="primary" id="btn-run-panel">Run</button>
+              </div>
+            </div>
+            <label class="field run-input-wrap">
+              <span>Input</span>
+              <textarea id="run-input" placeholder="Optional extra input for this skill"></textarea>
+            </label>
+            <pre id="run-output">Select a skill or workflow and click Run.</pre>
+            <pre id="run-log"></pre>
           </div>
         </div>
       </section>

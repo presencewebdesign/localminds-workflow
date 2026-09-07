@@ -2,12 +2,14 @@
 /**
  * Standalone workflow CMS. Writes ProjectLibrary JSON under <repo>/.localminds
  * and validates with compileWorkflow from @localminds/workflow.
- * Does not change the engine — it only requires the published/local package.
+ * Run uses GraphExecutor with a Studio preview host (Ollama or mock).
+ * File operations are never applied. Does not change the engine.
  */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { createStudioHost, detectStudioHost } = require('./host.cjs');
 
 const PKG_ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
@@ -24,11 +26,12 @@ const HOST = args.host || '127.0.0.1';
 const ROOT = path.resolve(args.root || process.env.LOCALMINDS_ROOT || process.cwd());
 
 function parseArgs(argv) {
-  const out = { help: false, open: true };
+  const out = { help: false, open: true, mock: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--help' || a === '-h') out.help = true;
     else if (a === '--no-open') out.open = false;
+    else if (a === '--mock') out.mock = true;
     else if (a === '--port' || a === '-p') out.port = Number(argv[++i]);
     else if (a === '--host') out.host = argv[++i];
     else if (a === '--root' || a === '-r') out.root = argv[++i];
@@ -48,6 +51,7 @@ Options:
   --root, -r <dir>   Repo root (default: cwd)
   --port, -p <n>     Port (default: 4174)
   --host <addr>      Bind address (default: 127.0.0.1)
+  --mock             Force the mock preview host (skip Ollama)
   --no-open          Do not open a browser
   --help             Show this help
 `);
@@ -219,6 +223,45 @@ function projectPayload() {
   };
 }
 
+function findEntity(library, slug) {
+  for (const key of ['skills', 'agents', 'prompts', 'instructions']) {
+    const item = (library[key] || []).find((entity) => entity.slug === slug);
+    if (item) return item;
+  }
+  return null;
+}
+
+function runnableWorkflow(library, kind, slug, input) {
+  if (kind === 'workflow') {
+    const workflow = (library.workflows || []).find((item) => item.slug === slug);
+    if (!workflow) throw new Error(`Workflow "${slug}" not found`);
+    return { ...workflow, autoApply: false };
+  }
+  const entity = findEntity(library, slug);
+  if (!entity) throw new Error(`${kind} "${slug}" not found`);
+  const stepType = entity.kind === 'instruction' || entity.kind === 'prompt' || entity.kind === 'agent'
+    ? entity.kind
+    : 'skill';
+  return {
+    id: `studio-run-${entity.slug}`,
+    slug: `studio-run-${entity.slug}`,
+    name: entity.name || entity.slug,
+    autoApply: false,
+    steps: [
+      {
+        id: entity.slug,
+        type: stepType,
+        ref: entity.slug,
+        input: input || '',
+      },
+    ],
+  };
+}
+
+function writeSse(res, event) {
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
 
@@ -249,10 +292,69 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/host') {
+      const info = await detectStudioHost(args.mock || url.searchParams.get('mock') === '1');
+      send(res, 200, { ok: true, ...info });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/run') {
+      const body = (await readBody(req)) || {};
+      const library = normalizeLibrary(body.library || readLibrary());
+      const kind = body.kind || 'skill';
+      const slug = body.slug;
+      if (!slug) throw new Error('Missing slug');
+      const workflow = runnableWorkflow(library, kind, slug, body.input);
+      const info = await detectStudioHost(args.mock || body.mock === true);
+      const { GraphExecutor } = loadEngine();
+      const host = createStudioHost({ root: ROOT, kind: info.kind, model: info.model });
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      writeSse(res, { type: 'run.meta', host: info.kind, model: info.model, workflowName: workflow.name });
+
+      const executor = new GraphExecutor(host, (message) => {
+        writeSse(res, { type: 'log', message, timestamp: Date.now() });
+      });
+      req.on('close', () => executor.abort());
+
+      try {
+        await executor.run(
+          workflow,
+          { emit: (event) => writeSse(res, event) },
+          {
+            library,
+            getRouting: () => ({
+              offlineMode: info.kind === 'mock' || body.offline === true,
+              model: info.model,
+            }),
+          },
+        );
+      } catch (err) {
+        writeSse(res, {
+          type: 'workflow.failed',
+          error: { message: err instanceof Error ? err.message : String(err) },
+          timestamp: Date.now(),
+        });
+      }
+      res.end();
+      return;
+    }
+
     if (serveStatic(req, res)) return;
     send(res, 404, { error: 'Not found' });
   } catch (err) {
-    send(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    const message = err instanceof Error ? err.message : String(err);
+    if (res.headersSent) {
+      writeSse(res, { type: 'workflow.failed', error: { message }, timestamp: Date.now() });
+      res.end();
+      return;
+    }
+    send(res, 400, { ok: false, error: message });
   }
 });
 

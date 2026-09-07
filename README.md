@@ -35,11 +35,20 @@ No manual host implementation is required.
 
 Studio is a standalone browser CMS for creating skills and workflows without
 writing TypeScript. It saves committed workflow JSON under `.localminds/`.
+Select a skill or workflow and click **Run** to preview it (Ollama if local,
+otherwise a mock host). File operations are never applied from Studio.
 
 From another repository:
 
 ```bash
 npm install @localminds/workflow
+npx localminds-workflow
+```
+
+The shorter command uses the current directory as the repository root. The
+explicit form remains available for LocalMinds:
+
+```bash
 npx localminds-workflow --root .
 ```
 

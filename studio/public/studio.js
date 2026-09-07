@@ -17,6 +17,15 @@
     selection: null,
     tab: 'fields',
     compile: { ir: null, error: null },
+    run: {
+      active: false,
+      host: '',
+      model: '',
+      nodes: {},
+      outputs: {},
+      output: '',
+      abort: null,
+    },
   };
 
   const $ = (id) => document.getElementById(id);
@@ -33,6 +42,15 @@
     jsonEditor: $('json-editor'),
     compileStatus: $('compile-status'),
     toast: $('toast'),
+    runBody: $('run-body'),
+    runHeading: $('run-heading'),
+    runHost: $('run-host'),
+    runInput: $('run-input'),
+    runInputWrap: document.querySelector('.run-input-wrap'),
+    runOutput: $('run-output'),
+    runLog: $('run-log'),
+    btnRun: $('btn-run'),
+    btnRunPanel: $('btn-run-panel'),
   };
 
   function emptyLibrary() {
@@ -173,6 +191,202 @@
       els.compileStatus.className = 'state fail';
     }
     renderGraph();
+  }
+
+  function runnableSelection() {
+    const sel = state.selection;
+    if (!sel) return null;
+    if (sel.kind === 'workflow' || sel.kind === 'step') {
+      const workflow = selectedWorkflow();
+      return workflow ? { kind: 'workflow', slug: workflow.slug, name: workflow.name } : null;
+    }
+    if (sel.kind === 'skill' || sel.kind === 'agent' || sel.kind === 'prompt' || sel.kind === 'instruction') {
+      const item = collection(sel.kind).find((entity) => entity.slug === sel.slug);
+      return item ? { kind: sel.kind, slug: item.slug, name: item.name } : null;
+    }
+    return null;
+  }
+
+  async function loadHost() {
+    try {
+      const data = await api('/api/host');
+      state.run.host = data.kind;
+      state.run.model = data.model;
+      renderRunChrome();
+    } catch {
+      state.run.host = 'mock';
+      state.run.model = 'studio-mock';
+      renderRunChrome();
+    }
+  }
+
+  function renderRunChrome() {
+    const target = runnableSelection();
+    const running = state.run.active;
+    for (const btn of [els.btnRun, els.btnRunPanel]) {
+      if (!btn) continue;
+      btn.disabled = !target && !running;
+      btn.textContent = running ? 'Stop' : 'Run';
+      btn.classList.toggle('run-on', running);
+    }
+    const hostLabel = state.run.host
+      ? `${state.run.host}${state.run.model ? ` · ${state.run.model}` : ''}`
+      : '—';
+    els.runHost.textContent = running ? 'Running' : hostLabel;
+    els.runHost.className = 'state' + (running ? ' dirty' : state.run.host === 'ollama' ? ' ok' : '');
+    if (target) {
+      els.runHeading.textContent = target.kind === 'workflow' ? 'Run workflow' : `Run ${target.kind}`;
+    } else {
+      els.runHeading.textContent = 'Run';
+    }
+    if (els.runInputWrap) {
+      els.runInputWrap.hidden = !target || target.kind === 'workflow';
+    }
+  }
+
+  function resetRunView(message) {
+    state.run.nodes = {};
+    state.run.outputs = {};
+    state.run.output = '';
+    els.runLog.replaceChildren();
+    els.runOutput.textContent = message;
+  }
+
+  function appendRunLog(ev) {
+    const line = document.createElement('span');
+    line.className = 'ev';
+    const kind = ev.type || '';
+    if (kind.includes('failed') || kind.includes('cancelled')) line.classList.add('fail');
+    else if (kind.includes('completed') || kind === 'join.completed') line.classList.add('ok');
+    else if (kind.includes('started') || kind.includes('tool') || kind === 'node.token') line.classList.add('run');
+    const time = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '';
+    const extra = ev.title || ev.outputText || ev.detail || ev.message || (ev.error && ev.error.message) || ev.tool || '';
+    line.textContent = `${time}  ${kind}${ev.nodeId ? ' · ' + ev.nodeId : ''}${extra ? ' · ' + String(extra).slice(0, 140) : ''}`;
+    els.runLog.appendChild(line);
+    els.runLog.scrollTop = els.runLog.scrollHeight;
+  }
+
+  function setRunNodeStatus(id, status) {
+    if (!id) return;
+    state.run.nodes[id] = status;
+    const el = [...els.stage.querySelectorAll('.node')].find((node) => node.dataset.id === id);
+    if (!el) return;
+    const on = el.classList.contains('on');
+    el.className = 'node ' + (el.dataset.kind || '') + ' ' + status + (on ? ' on' : '');
+    const statusEl = el.querySelector('.status');
+    if (statusEl) statusEl.textContent = status.replaceAll('_', ' ');
+  }
+
+  function handleRunEvent(ev) {
+    if (ev.type === 'run.meta') {
+      state.run.host = ev.host || state.run.host;
+      state.run.model = ev.model || state.run.model;
+      renderRunChrome();
+      appendRunLog({ type: 'log', message: `Host: ${ev.host} · ${ev.model}`, timestamp: Date.now() });
+      return;
+    }
+    if (ev.type !== 'node.token' && ev.type !== 'node.thinking') appendRunLog(ev);
+    if (ev.type === 'node.started') setRunNodeStatus(ev.nodeId, 'running');
+    if (ev.type === 'node.toolRequested') setRunNodeStatus(ev.nodeId, 'waiting_for_tool');
+    if (ev.type === 'node.toolCompleted' || ev.type === 'node.token') setRunNodeStatus(ev.nodeId, 'running');
+    if (ev.type === 'node.waitingForApproval') setRunNodeStatus(ev.nodeId, 'waiting_for_approval');
+    if (ev.type === 'node.completed' || ev.type === 'join.completed') {
+      setRunNodeStatus(ev.nodeId, 'completed');
+      if (ev.outputText) {
+        state.run.outputs[ev.nodeId] = ev.outputText;
+        state.run.output = ev.outputText;
+        els.runOutput.textContent = ev.outputText;
+      }
+    }
+    if (ev.type === 'node.failed') setRunNodeStatus(ev.nodeId, 'failed');
+    if (ev.type === 'node.cancelled') setRunNodeStatus(ev.nodeId, 'cancelled');
+    if (ev.type === 'node.token' && ev.nodeId) {
+      state.run.outputs[ev.nodeId] = (state.run.outputs[ev.nodeId] || '') + ev.token;
+      state.run.output = state.run.outputs[ev.nodeId];
+      els.runOutput.textContent = state.run.output;
+    }
+    if (ev.type === 'workflow.completed') {
+      els.runOutput.textContent = state.run.output || 'Completed.';
+    }
+    if (ev.type === 'workflow.failed') {
+      els.runOutput.textContent = (ev.error && ev.error.message) || 'Run failed';
+    }
+  }
+
+  async function readSse(response, onEvent) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      for (const part of parts) {
+        const line = part.split('\n').find((row) => row.startsWith('data: '));
+        if (!line) continue;
+        onEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  }
+
+  function stopRun() {
+    if (state.run.abort) state.run.abort.abort();
+  }
+
+  async function startRun() {
+    if (state.run.active) {
+      stopRun();
+      return;
+    }
+    const target = runnableSelection();
+    if (!target) {
+      toast('Select a skill or workflow to run', 'fail');
+      return;
+    }
+    const abort = new AbortController();
+    state.run.active = true;
+    state.run.abort = abort;
+    resetRunView('Running…');
+    renderRunChrome();
+    renderGraph();
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          library: state.library,
+          kind: target.kind,
+          slug: target.slug,
+          input: els.runInput.value,
+        }),
+        signal: abort.signal,
+      });
+      if (!res.ok) {
+        let message = `Run failed: ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data.error) message = data.error;
+        } catch {
+          // ignore
+        }
+        throw new Error(message);
+      }
+      await readSse(res, handleRunEvent);
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        appendRunLog({ type: 'log', message: 'Stopped', timestamp: Date.now() });
+        els.runOutput.textContent = state.run.output || 'Stopped.';
+      } else {
+        toast(err.message, 'fail');
+        els.runOutput.textContent = err.message;
+      }
+    } finally {
+      state.run.active = false;
+      state.run.abort = null;
+      renderRunChrome();
+    }
   }
 
   function addEntity(kind) {
@@ -823,7 +1037,7 @@
       return;
     }
 
-    const W = 156, H = 62, GX = 44, GY = 42;
+    const W = 156, H = 74, GX = 44, GY = 42;
     const incoming = new Map(ir.nodes.map((n) => [n.id, []]));
     for (const e of ir.edges) incoming.get(e.to)?.push(e.from);
     const level = new Map();
@@ -872,7 +1086,10 @@
     for (const n of ir.nodes) {
       const p = pos.get(n.id);
       const el = document.createElement('div');
-      el.className = 'node ' + n.kind;
+      const runStatus = state.run.nodes[n.id] || '';
+      el.className = 'node ' + n.kind + (runStatus ? ` ${runStatus}` : '');
+      el.dataset.id = n.id;
+      el.dataset.kind = n.kind;
       const stepId = n.kind === 'join' ? n.id.replace(/__join$/, '') : n.id;
       if (selectedStep && (selectedStep.id === stepId || selectedStep.id === n.id)) el.classList.add('on');
       el.style.left = `${p.left}px`;
@@ -883,11 +1100,15 @@
       const title = document.createElement('div');
       title.className = 'title';
       title.textContent = n.title || n.id;
-      el.append(kind, title);
+      const status = document.createElement('div');
+      status.className = 'status';
+      status.textContent = runStatus ? runStatus.replaceAll('_', ' ') : '';
+      el.append(kind, title, status);
       el.addEventListener('click', () => {
         const workflow = selectedWorkflow();
         const found = findStepPath(workflow.steps, stepId);
         if (found) setSelection({ kind: 'step', workflowSlug: workflow.slug, path: found });
+        if (state.run.outputs[n.id]) els.runOutput.textContent = state.run.outputs[n.id];
       });
       els.stage.appendChild(el);
     }
@@ -912,6 +1133,8 @@
       els.editor.hidden = false;
     }
     els.workflowBody.hidden = !(state.selection && (state.selection.kind === 'workflow' || state.selection.kind === 'step'));
+    els.runBody.hidden = !runnableSelection();
+    renderRunChrome();
     renderSidebar();
     renderMeta();
     if (!els.workflowBody.hidden) renderStepTree();
@@ -947,6 +1170,8 @@
         else toast('Workflow compiles to Graph IR', 'ok');
       });
     });
+    $('btn-run').addEventListener('click', () => startRun());
+    $('btn-run-panel').addEventListener('click', () => startRun());
     $('btn-example').addEventListener('click', loadExample);
     $('empty-example').addEventListener('click', loadExample);
     $('btn-export').addEventListener('click', exportJson);
@@ -988,5 +1213,6 @@
   }
 
   bind();
+  loadHost();
   loadProject().catch((err) => toast(err.message, 'fail'));
 })();

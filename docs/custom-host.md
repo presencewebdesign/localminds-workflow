@@ -166,7 +166,8 @@ when the host intentionally trusts the workflow and its tools.
 
 ## Studio and secrets
 
-Studio only authors and validates workflow JSON. It does not call a model or
-collect API keys. Put keys in [LocalMinds](https://localminds.io) settings or
-in the host application that constructs `WorkflowHost` and calls
-`GraphExecutor`.
+Studio authors and validates workflow JSON, and can preview-run skills through
+`GraphExecutor`. It does not collect API keys. If Ollama is running locally,
+Studio uses it; otherwise it uses a mock host. File operations are never
+applied from Studio. Put cloud keys in [LocalMinds](https://localminds.io)
+settings or in the host application that constructs `WorkflowHost`.
