@@ -1,44 +1,71 @@
 # @localminds/workflow
 
-[![License: MIT](https://img.shields.io/badge/License: MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Host-agnostic workflow execution for agent applications.
+Host-agnostic workflow execution for agent applications — use it with
+[LocalMinds](https://localminds.io) or your own Node.js host.
 
-## Introduction
+## What it is
 
-`@localminds/workflow` is a small TypeScript/Node.js engine for describing reusable
-skills and running them as workflows. It is designed for LocalMinds, but it can
-also be embedded in a CLI, web server, desktop app, CI job, or another Node.js
-application.
-
-The package separates three concerns:
+`@localminds/workflow` is a TypeScript/Node.js engine for describing reusable
+skills and running them as workflows. It compiles workflow steps into a graph,
+executes sequential, parallel, and looping steps, and emits lifecycle events.
 
 ```text
 skills and workflow steps → graph compiler → graph executor → host-provided tools
 ```
 
-The engine owns workflow orchestration. Your application owns the model provider,
-filesystem, terminal, web search, memory, persistence, and user interface.
+The engine owns orchestration. Your application or LocalMinds owns the model
+provider, filesystem, terminal, web search, memory, persistence, and UI.
 
-## What it does
+## Choose your setup
 
-- Compiles sequential, parallel, and looping workflow steps into Graph IR.
-- Executes independent parallel branches and joins their results.
-- Supports count-based and condition-based loops with iteration limits.
-- Resolves skills, agents, prompts, and instructions through one adapter.
-- Streams workflow, node, token, tool, approval, and failure events.
-- Supports cancellation and approval before file or terminal operations.
-- Keeps model and tool integrations host-injected through `WorkflowHost`.
-- Runs in offline or online routing modes without importing a specific provider.
+### Recommended: LocalMinds
 
-The engine does not include a model runtime, filesystem implementation,
-terminal runner, web-search service, or persistence layer. Those stay
-host-injected. For teams that do not want to build an authoring UI, the
-package also ships a standalone browser CMS that writes workflow JSON.
+[LocalMinds](https://localminds.io) provides the `WorkflowHost`, local and cloud
+model routing, tools, approvals, and workflow UI.
+
+1. Install the LocalMinds VS Code extension.
+2. Choose a local or cloud model in LocalMinds settings.
+3. Open the Command Palette and run **Project Workflows**.
+
+No manual host implementation is required.
+
+### Author workflows with Studio
+
+Studio is a standalone browser CMS for creating skills and workflows without
+writing TypeScript. It saves committed workflow JSON under `.localminds/`.
+
+From another repository:
+
+```bash
+npm install @localminds/workflow
+npx localminds-workflow --root .
+```
+
+Then open [http://127.0.0.1:4174](http://127.0.0.1:4174).
+
+### Embed the engine in your application
+
+Install the package, define a `ProjectLibrary` and `Workflow`, and implement
+the `WorkflowHost` boundary. See the [custom host guide](docs/custom-host.md)
+for model routing, Ollama, OpenRouter, approvals, and host requirements.
+
+### Try the included demo
+
+From a checkout of this repository:
+
+```bash
+npm install
+npm run demo
+```
+
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173). The demo uses mock
+services only; it does not call a real model or modify files.
 
 ## Installation
 
-Install the published package:
+Node.js 18 or newer is required.
 
 ```bash
 npm install @localminds/workflow
@@ -50,9 +77,7 @@ For local development before publishing:
 npm install ../localminds-workflow
 ```
 
-Node.js 18 or newer is required.
-
-## How to use it
+## Minimal usage
 
 ### 1. Define a project library
 
@@ -79,9 +104,6 @@ const library: ProjectLibrary = {
 };
 ```
 
-Agents, prompts, and instructions can also be referenced by workflow steps. The
-adapter maps them to the common skill runtime.
-
 ### 2. Define a workflow
 
 ```ts
@@ -97,49 +119,10 @@ const workflow: Workflow = {
 };
 ```
 
-Parallel and loop steps can contain nested `steps`:
+Use `type: 'parallel'` or `type: 'loop'` with nested `steps` for fan-out or
+repeated work.
 
-```ts
-const workflow: Workflow = {
-  id: 'research',
-  slug: 'research',
-  name: 'Research',
-  steps: [
-    {
-      id: 'sources',
-      type: 'parallel',
-      steps: [
-        { id: 'docs', type: 'skill', ref: 'summarize' },
-        { id: 'notes', type: 'skill', ref: 'summarize' },
-      ],
-    },
-    {
-      id: 'refine',
-      type: 'loop',
-      loop: { kind: 'count', count: 2 },
-      steps: [{ id: 'iteration', type: 'skill', ref: 'summarize' }],
-    },
-  ],
-};
-```
-
-### 3. Implement the host boundary
-
-The engine calls the `WorkflowHost` supplied by your application. The host
-connects the workflow to your model provider, files, tools, and memory:
-
-```ts
-import type { WorkflowHost } from '@localminds/workflow';
-
-// Implement this interface in the application that embeds the package.
-const host: WorkflowHost = createWorkflowHost();
-```
-
-`createWorkflowHost` above represents an application-specific factory; the
-package does not provide one. Implement the `WorkflowHost` interface directly or
-adapt your existing application services to it.
-
-### 4. Compile or execute the workflow
+### 3. Compile or execute
 
 Use `compileWorkflow` when you only need the graph:
 
@@ -147,138 +130,69 @@ Use `compileWorkflow` when you only need the graph:
 import { compileWorkflow } from '@localminds/workflow';
 
 const graph = compileWorkflow(workflow);
-console.log(graph.nodes);
-console.log(graph.edges);
+console.log(graph.nodes, graph.edges);
 ```
 
-Use `GraphExecutor` to run it:
+To execute, provide a `WorkflowHost` implementation. `createWorkflowHost()` is
+an application-specific placeholder; the package does not provide that factory.
 
 ```ts
 import {
   GraphExecutor,
   createRoutingSession,
   type GraphWorkflowEvent,
+  type WorkflowHost,
 } from '@localminds/workflow';
 
+const host: WorkflowHost = createWorkflowHost();
 const routing = createRoutingSession({
   offlineMode: true,
   localModel: 'gemma4:e4b',
 });
 
-const executor = new GraphExecutor(host, console.log);
-
-const executions = await executor.run(
+const executor = new GraphExecutor(host);
+await executor.run(
   workflow,
   {
     emit(event: GraphWorkflowEvent) {
-      // Render these events in a CLI, browser UI, or desktop panel.
       console.log(event.type, event);
     },
     requestApproval: async ({ title, preview }) => {
-      // Replace with a real confirmation dialog in the host application.
+      // Demo default: reject changes until the host has a confirmation UI.
       console.log(`Approval required for ${title}\n${preview}`);
-      return true;
+      return false;
     },
   },
-  {
-    library,
-    getRouting: () => routing.get(),
-  },
+  { library, getRouting: () => routing.get() },
 );
-
-console.log(executions);
 ```
 
-To cancel an active run, call:
+> **Safety:** Never auto-approve file changes or terminal commands in
+> production. Show the preview in a confirmation dialog and return the user's
+> decision. Only set `workflow.autoApply` to `true` when those operations are
+> intentionally trusted.
 
-```ts
-executor.abort();
-```
+Cancel an active run with `executor.abort()`.
 
-## Public API
+## Models and providers
 
-Important exports include:
+The engine is model-provider agnostic. It does not ship a provider SDK or read
+API keys. LocalMinds handles this integration for you. Custom hosts can connect
+`host.chat` to Ollama, OpenRouter, OpenAI, Anthropic, or another gateway.
 
-- `compileWorkflow` — converts a `Workflow` to `GraphIR`.
-- `GraphExecutor` — executes a workflow and emits lifecycle events.
-- `GraphScheduler` — manages node state transitions.
-- `adaptEntityToSkill`, `resolveSkill`, `alwaysOnSkills` — entity compatibility helpers.
-- `WorkflowContext` — stores outputs and interpolation state during a run.
-- `createRoutingSession` — manages local/cloud model routing.
-- `Workflow`, `ProjectLibrary`, `WorkflowHost`, and graph/event types.
+See the [custom host guide](docs/custom-host.md) for provider examples. Keep
+secrets in the host environment or a secret manager, never in committed
+`.localminds/` JSON.
 
-## How to run the package
+## API and development
 
-The package is a library, so it does not start a server or browser page by
-itself. Run these commands from the repository when developing it:
+Important exports include `compileWorkflow`, `GraphExecutor`, `GraphScheduler`,
+`WorkflowContext`, `createRoutingSession`, `Workflow`, `ProjectLibrary`,
+`WorkflowHost`, and graph/event types.
 
-```bash
-npm install
-npm run build
-npm test
-```
-
-Additional development command:
-
-```bash
-npm run watch
-```
-
-`npm run build` writes compiled JavaScript and type declarations to `dist/`.
-`npm test` builds first and then runs the compiled Node.js test files.
-
-## Workflow CMS
-
-If you do not want to hard-code workflows in TypeScript, run the standalone
-CMS in any repo. It authors the same `ProjectLibrary` / `Workflow` JSON the
-engine already compiles. It does not change the engine; it only reads and
-writes `.localminds/` and calls `compileWorkflow` to validate.
-
-From this package:
-
-```bash
-npm run studio
-```
-
-From another repo after installing the package:
-
-```bash
-npx localminds-workflow
-npx localminds-workflow --root /path/to/repo
-```
-
-Then open [http://127.0.0.1:4174](http://127.0.0.1:4174). Create skills and
-workflows, nest parallel / loop steps, and save. Files are written to:
-
-```text
-.localminds/library.json
-.localminds/workflows/<slug>.json
-```
-
-Load those JSON files in your application and pass them to `compileWorkflow`
-or `GraphExecutor` as usual.
-
-## Live browser demo
-
-This repository includes a mock host and a small browser UI that exercise the
-real compiler and executor. It runs the sample graph:
-
-```text
-plan → parallel web + repo → join → review
-```
-
-Start it with:
-
-```bash
-npm run demo
-```
-
-Then open [http://127.0.0.1:4173](http://127.0.0.1:4173). Click **Run graph** to
-watch node status changes and the event stream. Toggle **Offline** to skip the
-mock web-search tool.
-
-The demo uses mock services only; it does not call a real model, modify files,
-run terminal commands, or access the public web.
+- [API reference](docs/api.md)
+- [Custom host and model guide](docs/custom-host.md)
+- [Development, Studio, and demo guide](docs/development.md)
 
 ## License
 
